@@ -2,236 +2,228 @@
 
 from __future__ import annotations
 
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Callable,
-    Iterable,
-    List,
-    Optional,
-    Tuple,
-    Type,
-    TypeVar,
-)
+import asyncio
+from functools import partial
+from typing import Any, Callable, Iterable, List, Optional, Tuple, Type, TypeVar
+from uuid import uuid4
 
+import deeplake
+import numpy as np
+from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import VectorStore
 
-if TYPE_CHECKING:
-    from langchain_core.documents import Document
-
-VST = TypeVar("VST", bound=VectorStore)
+VST = TypeVar("VST", bound="DeeplakeVectorStore")
 
 
 class DeeplakeVectorStore(VectorStore):
-    # TODO: Replace all TODOs in docstring.
     """Deeplake vector store integration.
 
-    # TODO: Replace with relevant packages, env vars.
     Setup:
-        Install ``langchain-deeplake`` and set environment variable ``DEEPLAKE_API_KEY``.
+        Install ``langchain-deeplake`` package:
 
         .. code-block:: bash
 
             pip install -U langchain-deeplake
-            export DEEPLAKE_API_KEY="your-api-key"
 
-    # TODO: Populate with relevant params.
-    Key init args — indexing params:
-        collection_name: str
-            Name of the collection.
-        embedding_function: Embeddings
-            Embedding function to use.
+    Args:
+        dataset_path: Path/URL to store the dataset
+        embedding_function: Embedding model to use
+        token: Optional Activeloop token
+        read_only: Whether to open dataset in read-only mode
+        creds: Optional cloud credentials for dataset access
+        overwrite: Whether to overwrite existing dataset
+    """
 
-    # TODO: Populate with relevant params.
-    Key init args — client params:
-        client: Optional[Client]
-            Client to use.
-        connection_args: Optional[dict]
-            Connection arguments.
+    def __init__(
+        self,
+        dataset_path: str,
+        embedding_function: Optional[Embeddings] = None,
+        token: Optional[str] = None,
+        read_only: bool = False,
+        creds: Optional[dict] = None,
+        overwrite: bool = False,
+    ) -> None:
+        """Initialize Deeplake vector store."""
+        self.embedding_function = embedding_function
+        self.dataset_path = dataset_path
+        self.token = token
+        self.creds = creds
 
-    # TODO: Replace with relevant init params.
-    Instantiate:
-        .. code-block:: python
+        exists = deeplake.exists(dataset_path, token=token, creds=creds)
 
-            from langchain_deeplake.vectorstores import DeeplakeVectorStore
-            from langchain_openai import OpenAIEmbeddings
+        if overwrite and exists:
+            deeplake.delete(dataset_path)
 
-            vector_store = DeeplakeVectorStore(
-                collection_name="foo",
-                embedding_function=OpenAIEmbeddings(),
-                connection_args={"uri": "./foo.db"},
-                # other params...
+        if exists:
+            self.dataset = (
+                deeplake.open(dataset_path, token=token, creds=creds)
+                if not read_only
+                else deeplake.open_read_only(dataset_path, token=token, creds=creds)
+            )
+        else:
+            self.dataset = deeplake.create(
+                dataset_path,
+                token=token,
+                creds=creds,
+                schema={
+                    "ids": deeplake.types.Text(),
+                    "embeddings": deeplake.types.Embedding(),
+                    "metadatas": deeplake.types.Dict(),
+                    "documents": deeplake.types.Text(),
+                },
             )
 
-    # TODO: Populate with relevant variables.
-    Add Documents:
-        .. code-block:: python
+    def __len__(self) -> int:
+        """Return the number of documents in the vector store."""
+        return len(self.dataset)
 
-            from langchain_core.documents import Document
-
-            document_1 = Document(page_content="foo", metadata={"baz": "bar"})
-            document_2 = Document(page_content="thud", metadata={"bar": "baz"})
-            document_3 = Document(page_content="i will be deleted :(")
-
-            documents = [document_1, document_2, document_3]
-            ids = ["1", "2", "3"]
-            vector_store.add_documents(documents=documents, ids=ids)
-
-    # TODO: Populate with relevant variables.
-    Delete Documents:
-        .. code-block:: python
-
-            vector_store.delete(ids=["3"])
-
-    # TODO: Fill out with relevant variables and example output.
-    Search:
-        .. code-block:: python
-
-            results = vector_store.similarity_search(query="thud",k=1)
-            for doc in results:
-                print(f"* {doc.page_content} [{doc.metadata}]")
-
-        .. code-block:: python
-
-            # TODO: Example output
-
-    # TODO: Fill out with relevant variables and example output.
-    Search with filter:
-        .. code-block:: python
-
-            results = vector_store.similarity_search(query="thud",k=1,filter={"bar": "baz"})
-            for doc in results:
-                print(f"* {doc.page_content} [{doc.metadata}]")
-
-        .. code-block:: python
-
-            # TODO: Example output
-
-    # TODO: Fill out with relevant variables and example output.
-    Search with score:
-        .. code-block:: python
-
-            results = vector_store.similarity_search_with_score(query="qux",k=1)
-            for doc, score in results:
-                print(f"* [SIM={score:3f}] {doc.page_content} [{doc.metadata}]")
-
-        .. code-block:: python
-
-            # TODO: Example output
-
-    # TODO: Fill out with relevant variables and example output.
-    Async:
-        .. code-block:: python
-
-            # add documents
-            # await vector_store.aadd_documents(documents=documents, ids=ids)
-
-            # delete documents
-            # await vector_store.adelete(ids=["3"])
-
-            # search
-            # results = vector_store.asimilarity_search(query="thud",k=1)
-
-            # search with score
-            results = await vector_store.asimilarity_search_with_score(query="qux",k=1)
-            for doc,score in results:
-                print(f"* [SIM={score:3f}] {doc.page_content} [{doc.metadata}]")
-
-        .. code-block:: python
-
-            # TODO: Example output
-
-    # TODO: Fill out with relevant variables and example output.
-    Use as Retriever:
-        .. code-block:: python
-
-            retriever = vector_store.as_retriever(
-                search_type="mmr",
-                search_kwargs={"k": 1, "fetch_k": 2, "lambda_mult": 0.5},
-            )
-            retriever.invoke("thud")
-
-        .. code-block:: python
-
-            # TODO: Example output
-
-    """  # noqa: E501
-
-    _database: dict[str, tuple[Document, list[float]]] = {}
+    def get_by_ids(self, ids: List[str], **kwargs: Any) -> List[Document]:
+        """Return documents by ID."""
+        ids_str = ", ".join([f"'{i}'" for i in ids])
+        results = self.dataset.query(f"SELECT * WHERE ids IN ({ids_str})")
+        docs = results["documents"][:]
+        metadatas = results["metadatas"][:]
+        return [
+            Document(page_content=docs[i], metadata=metadatas[i].to_dict())
+            for i in range(len(results))
+        ]
 
     def add_texts(
         self,
         texts: Iterable[str],
         metadatas: Optional[List[dict]] = None,
+        ids: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> List[str]:
-        raise NotImplementedError
+        """Add texts to the vector store."""
+        # Convert iterator to list
+        texts = list(texts)
 
-    # optional: add custom async implementations
-    # async def aadd_texts(
-    #     self,
-    #     texts: Iterable[str],
-    #     metadatas: Optional[List[dict]] = None,
-    #     **kwargs: Any,
-    # ) -> List[str]:
-    #     return await asyncio.get_running_loop().run_in_executor(
-    #         None, partial(self.add_texts, **kwargs), texts, metadatas
-    #     )
+        # Generate embeddings
+        embeddings = self.embedding_function.embed_documents(texts)
+
+        # Generate IDs if not provided
+        if ids is None:
+            ids = [str(uuid4()) for _ in texts]
+
+        # Handle metadata
+        if metadatas is None:
+            metadatas = [{} for _ in texts]
+
+        # Add to dataset
+        self.dataset.append(
+            {
+                "ids": ids,
+                "embeddings": embeddings,
+                "metadatas": metadatas,
+                "documents": texts,
+            }
+        )
+        self.dataset.commit()
+
+        return ids
+
+    async def aadd_texts(
+        self,
+        texts: Iterable[str],
+        metadatas: Optional[List[dict]] = None,
+        ids: Optional[List[str]] = None,
+        **kwargs: Any,
+    ) -> List[str]:
+        """Asynchronously add texts to the vector store."""
+        return await asyncio.get_running_loop().run_in_executor(
+            None, partial(self.add_texts, **kwargs), texts, metadatas, ids
+        )
 
     def delete(self, ids: Optional[List[str]] = None, **kwargs: Any) -> Optional[bool]:
-        raise NotImplementedError
+        """Delete documents by ID from the vector store."""
+        if not ids:
+            return False
 
-    # optional: add custom async implementations
-    # async def adelete(
-    #     self, ids: Optional[List[str]] = None, **kwargs: Any
-    # ) -> Optional[bool]:
-    #     raise NotImplementedError
+        ids_str = ", ".join([f"'{i}'" for i in ids])
+        # Query to find indices to delete
+        query = (
+            f"SELECT * FROM (SELECT *, ROW_NUMBER() as row_id) WHERE ids IN ({ids_str})"
+        )
+        results = self.dataset.query(query)
+
+        if len(results) == 0:
+            return False
+
+        # Delete found documents
+        for idx in sorted(results.row_ids, reverse=True):
+            self.dataset.delete(idx)
+
+        self.dataset.commit()
+        return True
+
+    async def adelete(
+        self, ids: Optional[List[str]] = None, **kwargs: Any
+    ) -> Optional[bool]:
+        """Asynchronously delete documents by ID."""
+        return await asyncio.get_running_loop().run_in_executor(
+            None, partial(self.delete, **kwargs), ids
+        )
 
     def similarity_search(
-        self, query: str, k: int = 4, **kwargs: Any
+        self, query: str, k: int = 4, filter: Optional[dict] = None, **kwargs: Any
     ) -> List[Document]:
-        raise NotImplementedError
+        """Return documents most similar to query."""
+        docs_with_scores = self.similarity_search_with_score(query, k, filter, **kwargs)
+        return [doc for doc, _ in docs_with_scores]
 
-    # optional: add custom async implementations
-    # async def asimilarity_search(
-    #     self, query: str, k: int = 4, **kwargs: Any
-    # ) -> List[Document]:
-    #     # This is a temporary workaround to make the similarity search
-    #     # asynchronous. The proper solution is to make the similarity search
-    #     # asynchronous in the vector store implementations.
-    #     func = partial(self.similarity_search, query, k=k, **kwargs)
-    #     return await asyncio.get_event_loop().run_in_executor(None, func)
+    async def asimilarity_search(
+        self, query: str, k: int = 4, filter: Optional[dict] = None, **kwargs: Any
+    ) -> List[Document]:
+        """Asynchronously return documents most similar to query."""
+        func = partial(self.similarity_search, query, k=k, filter=filter, **kwargs)
+        return await asyncio.get_running_loop().run_in_executor(None, func)
 
     def similarity_search_with_score(
-        self, *args: Any, **kwargs: Any
+        self, query: str, k: int = 4, filter: Optional[dict] = None, **kwargs: Any
     ) -> List[Tuple[Document, float]]:
-        raise NotImplementedError
+        """Return documents most similar to query with scores."""
+        query_embedding = self.embedding_function.embed_query(query)
+        emb_str = ", ".join([str(e) for e in query_embedding])
 
-    # optional: add custom async implementations
-    # async def asimilarity_search_with_score(
-    #     self, *args: Any, **kwargs: Any
-    # ) -> List[Tuple[Document, float]]:
-    #     # This is a temporary workaround to make the similarity search
-    #     # asynchronous. The proper solution is to make the similarity search
-    #     # asynchronous in the vector store implementations.
-    #     func = partial(self.similarity_search_with_score, *args, **kwargs)
-    #     return await asyncio.get_event_loop().run_in_executor(None, func)
+        # Build TQL query
+        tql = f"""
+        SELECT * FROM (SELECT documents, metadatas, COSINE_SIMILARITY(embeddings, ARRAY[{emb_str}]) as score)
+        """
+        if filter:
+            conditions = [f"metadatas['{k}'] = '{v}'" for k, v in filter.items()]
+            tql += f" WHERE {' AND '.join(conditions)}"
 
-    def similarity_search_by_vector(
-        self, embedding: List[float], k: int = 4, **kwargs: Any
-    ) -> List[Document]:
-        raise NotImplementedError
+        tql += f" ORDER BY score DESC LIMIT {k}"
 
-    # optional: add custom async implementations
-    # async def asimilarity_search_by_vector(
-    #     self, embedding: List[float], k: int = 4, **kwargs: Any
-    # ) -> List[Document]:
-    #     # This is a temporary workaround to make the similarity search
-    #     # asynchronous. The proper solution is to make the similarity search
-    #     # asynchronous in the vector store implementations.
-    #     func = partial(self.similarity_search_by_vector, embedding, k=k, **kwargs)
-    #     return await asyncio.get_event_loop().run_in_executor(None, func)
+        results = self.dataset.query(tql)
+
+        docs_with_scores_columnar = {
+            "documents": results["documents"][:],
+            "metadatas": results["metadatas"][:],
+            "score": results["score"][:],
+        }
+
+        docs_with_scores = []
+        for i in range(len(results)):
+            doc = Document(
+                page_content=docs_with_scores_columnar["documents"][i],
+                metadata=docs_with_scores_columnar["metadatas"][i].to_dict(),
+            )
+            score = docs_with_scores_columnar["score"][i]
+            docs_with_scores.append((doc, score))
+
+        return docs_with_scores
+
+    async def asimilarity_search_with_score(
+        self, query: str, k: int = 4, filter: Optional[dict] = None, **kwargs: Any
+    ) -> List[Tuple[Document, float]]:
+        """Asynchronously return documents most similar to query with scores."""
+        func = partial(
+            self.similarity_search_with_score, query, k=k, filter=filter, **kwargs
+        )
+        return await asyncio.get_running_loop().run_in_executor(None, func)
 
     def max_marginal_relevance_search(
         self,
@@ -241,29 +233,11 @@ class DeeplakeVectorStore(VectorStore):
         lambda_mult: float = 0.5,
         **kwargs: Any,
     ) -> List[Document]:
-        raise NotImplementedError
-
-    # optional: add custom async implementations
-    # async def amax_marginal_relevance_search(
-    #     self,
-    #     query: str,
-    #     k: int = 4,
-    #     fetch_k: int = 20,
-    #     lambda_mult: float = 0.5,
-    #     **kwargs: Any,
-    # ) -> List[Document]:
-    #     # This is a temporary workaround to make the similarity search
-    #     # asynchronous. The proper solution is to make the similarity search
-    #     # asynchronous in the vector store implementations.
-    #     func = partial(
-    #         self.max_marginal_relevance_search,
-    #         query,
-    #         k=k,
-    #         fetch_k=fetch_k,
-    #         lambda_mult=lambda_mult,
-    #         **kwargs,
-    #     )
-    #     return await asyncio.get_event_loop().run_in_executor(None, func)
+        """Return documents selected using maximal marginal relevance."""
+        query_embedding = self.embedding_function.embed_query(query)
+        return self.max_marginal_relevance_search_by_vector(
+            query_embedding, k=k, fetch_k=fetch_k, lambda_mult=lambda_mult, **kwargs
+        )
 
     def max_marginal_relevance_search_by_vector(
         self,
@@ -273,18 +247,62 @@ class DeeplakeVectorStore(VectorStore):
         lambda_mult: float = 0.5,
         **kwargs: Any,
     ) -> List[Document]:
-        raise NotImplementedError
+        """Return docs selected using maximal marginal relevance by embedding."""
+        emb_str = ", ".join([str(e) for e in embedding])
+        # Get initial results
+        results = self.dataset.query(
+            f"""
+            SELECT * FROM (SELECT documents, metadatas, embeddings, 
+            COSINE_SIMILARITY(embeddings, ARRAY[{emb_str}]) as score)
+            ORDER BY score DESC LIMIT {fetch_k}
+        """
+        )
 
-    # optional: add custom async implementations
-    # async def amax_marginal_relevance_search_by_vector(
-    #     self,
-    #     embedding: List[float],
-    #     k: int = 4,
-    #     fetch_k: int = 20,
-    #     lambda_mult: float = 0.5,
-    #     **kwargs: Any,
-    # ) -> List[Document]:
-    #     raise NotImplementedError
+        if len(results) == 0:
+            return []
+
+        # Extract embeddings and convert to numpy
+        embeddings = results["embeddings"][:]
+
+        # Calculate MMR
+        selected_indices = []
+        remaining_indices = list(range(len(embeddings)))
+
+        for _ in range(min(k, len(embeddings))):
+            if not remaining_indices:
+                break
+
+            # Calculate MMR scores
+            if not selected_indices:
+                similarities = results["score"][:]
+                mmr_scores = similarities
+            else:
+                similarities = np.array(
+                    [results[i]["score"] for i in remaining_indices]
+                )
+                selected_embeddings = embeddings[selected_indices]
+                remaining_embeddings = embeddings[remaining_indices]
+
+                # Calculate diversity penalty
+                diversity_scores = np.max(
+                    np.dot(remaining_embeddings, selected_embeddings.T), axis=1
+                )
+                mmr_scores = (
+                    lambda_mult * similarities - (1 - lambda_mult) * diversity_scores
+                )
+
+            # Select next document
+            next_idx = remaining_indices[np.argmax(mmr_scores)]
+            selected_indices.append(next_idx)
+            remaining_indices.remove(next_idx)
+
+        # Return selected documents
+        return [
+            Document(
+                page_content=results[i]["documents"], metadata=results[i]["metadatas"]
+            )
+            for i in selected_indices
+        ]
 
     @classmethod
     def from_texts(
@@ -292,22 +310,28 @@ class DeeplakeVectorStore(VectorStore):
         texts: List[str],
         embedding: Embeddings,
         metadatas: Optional[List[dict]] = None,
+        dataset_path: str = "mem://langchain",
         **kwargs: Any,
     ) -> VST:
-        raise NotImplementedError
+        """Create DeeplakeVectorStore from raw texts."""
+        store = cls(dataset_path=dataset_path, embedding_function=embedding, **kwargs)
+        store.add_texts(texts=texts, metadatas=metadatas)
+        return store
 
-    # optional: add custom async implementations
-    # @classmethod
-    # async def afrom_texts(
-    #     cls: Type[VST],
-    #     texts: List[str],
-    #     embedding: Embeddings,
-    #     metadatas: Optional[List[dict]] = None,
-    #     **kwargs: Any,
-    # ) -> VST:
-    #     return await asyncio.get_running_loop().run_in_executor(
-    #         None, partial(cls.from_texts, **kwargs), texts, embedding, metadatas
-    #     )
+    @classmethod
+    async def afrom_texts(
+        cls: Type[VST],
+        texts: List[str],
+        embedding: Embeddings,
+        metadatas: Optional[List[dict]] = None,
+        dataset_path: str = "mem://langchain",
+        **kwargs: Any,
+    ) -> VST:
+        """Asynchronously create DeeplakeVectorStore from raw texts."""
+        store = cls(dataset_path=dataset_path, embedding_function=embedding, **kwargs)
+        await store.aadd_texts(texts=texts, metadatas=metadatas)
+        return store
 
     def _select_relevance_score_fn(self) -> Callable[[float], float]:
-        raise NotImplementedError
+        """Return relevance score function."""
+        return lambda x: x  # Identity function since scores are already normalized
