@@ -152,7 +152,7 @@ class DeeplakeVectorStore(VectorStore):
             return False
 
         # Delete found documents
-        for idx in sorted(results.row_ids, reverse=True):
+        for idx in sorted(results['row_id'][:], reverse=True):
             self.dataset.delete(idx)
 
         self.dataset.commit()

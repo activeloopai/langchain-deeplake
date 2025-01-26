@@ -1,8 +1,9 @@
-import pytest
-from langchain_deeplake import DeeplakeVectorStore
 from langchain_community.embeddings import FakeEmbeddings
-import requests
+from langchain_core.documents import Document
+from langchain_deeplake import DeeplakeVectorStore
+import pytest
 import re
+import requests
 
 
 def test_vectorstore_creation():
@@ -39,8 +40,24 @@ def test_search():
     vectorstore = DeeplakeVectorStore.from_texts(
         dataset_path="mem://test_search",
         texts=texts,
-        embedding=FakeEmbeddings(size=384, seed=42),
+        embedding=FakeEmbeddings(size=384),
     )
     assert len(vectorstore) == len(texts)
-    results = vectorstore.similarity_search("how we think", top_k=5)
+    results = vectorstore.similarity_search("how we think", k=5)
+    assert len(results) == 5
+
+    vectorstore = DeeplakeVectorStore("mem://test_search_2", embedding_function=FakeEmbeddings(size=384))
+    ids = vectorstore.add_texts(texts)
+    assert len(ids) == len(texts)
+    results = vectorstore.similarity_search("how we think", k=5)
+    assert len(results) == 5
+    vectorstore.delete(ids)
+    assert len(vectorstore) == 0
+    results = vectorstore.similarity_search("how we think", k=5)
+    assert len(results) == 0
+
+    docs = [Document(page_content=content) for content in texts]
+    vectorstore.add_documents(docs)
+    assert len(vectorstore) == len(texts)
+    results = vectorstore.similarity_search("how we think", k=5)
     assert len(results) == 5
