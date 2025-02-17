@@ -12,6 +12,12 @@ import numpy as np
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import VectorStore
+from langchain_deeplake.filtering_util import attribute_based_filtering_tql
+from langchain_deeplake.query import search
+from langchain_deeplake.exceptions import (
+    MissingQueryOrTQLError,
+    InvalidQuerySpecificationError,
+)
 
 VST = TypeVar("VST", bound="DeeplakeVectorStore")
 
@@ -50,12 +56,15 @@ class DeeplakeVectorStore(VectorStore):
         self.token = token
         self.creds = creds
 
-        exists = deeplake.exists(dataset_path, token=token, creds=creds)
+        try:
+            exists = deeplake.exists(dataset_path, token=token, creds=creds)
+        except Exception as e:
+            exists = False
 
         if overwrite and exists:
-            deeplake.delete(dataset_path)
+            deeplake.delete(dataset_path, token=token, creds=creds)
 
-        if exists:
+        if exists and not overwrite:
             self.dataset = (
                 deeplake.open(dataset_path, token=token, creds=creds)
                 if not read_only
@@ -73,26 +82,17 @@ class DeeplakeVectorStore(VectorStore):
                     "documents": deeplake.types.Text(),
                 },
             )
+            self.dataset.indexing_mode = deeplake.IndexingMode.Always
 
     def __len__(self) -> int:
         """Return the number of documents in the vector store."""
         return len(self.dataset)
 
-    def get_by_ids(self, ids: List[str], **kwargs: Any) -> List[Document]:
-        """Return documents by ID."""
-        ids_str = ", ".join([f"'{i}'" for i in ids])
-        results = self.dataset.query(f"SELECT * WHERE ids IN ({ids_str})")
-        docs = results["documents"][:]
-        metadatas = results["metadatas"][:]
-        return [
-            Document(page_content=docs[i], metadata=metadatas[i].to_dict())
-            for i in range(len(results))
-        ]
-
     def add_texts(
         self,
         texts: Iterable[str],
         metadatas: Optional[List[dict]] = None,
+        *,
         ids: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> List[str]:
@@ -124,17 +124,10 @@ class DeeplakeVectorStore(VectorStore):
 
         return ids
 
-    async def aadd_texts(
-        self,
-        texts: Iterable[str],
-        metadatas: Optional[List[dict]] = None,
-        ids: Optional[List[str]] = None,
-        **kwargs: Any,
-    ) -> List[str]:
-        """Asynchronously add texts to the vector store."""
-        return await asyncio.get_running_loop().run_in_executor(
-            None, partial(self.add_texts, **kwargs), texts, metadatas, ids
-        )
+    @property
+    def embeddings(self) -> Optional[Embeddings]:
+        """Access the query embedding object if available."""
+        return self.embedding_function
 
     def delete(self, ids: Optional[List[str]] = None, **kwargs: Any) -> Optional[bool]:
         """Delete documents by ID from the vector store."""
@@ -152,11 +145,28 @@ class DeeplakeVectorStore(VectorStore):
             return False
 
         # Delete found documents
-        for idx in sorted(results['row_id'][:], reverse=True):
+        for idx in sorted(results["row_id"][:], reverse=True):
             self.dataset.delete(idx)
 
         self.dataset.commit()
         return True
+
+    def get_by_ids(self, ids: List[str], **kwargs: Any) -> List[Document]:
+        """Return documents by ID."""
+        ids_str = ", ".join([f"'{i}'" for i in ids])
+        results = self.dataset.query(f"SELECT * WHERE ids IN ({ids_str})")
+        docs = results["documents"][:]
+        metadatas = results["metadatas"][:]
+        return [
+            Document(page_content=docs[i], metadata=metadatas[i].to_dict())
+            for i in range(len(results))
+        ]
+
+    async def aget_by_ids(self, ids: List[str], **kwargs: Any) -> List[Document]:
+        """Asynchronously return documents by ID."""
+        return await asyncio.get_running_loop().run_in_executor(
+            None, partial(self.get_by_ids, **kwargs), ids
+        )
 
     async def adelete(
         self, ids: Optional[List[str]] = None, **kwargs: Any
@@ -164,6 +174,19 @@ class DeeplakeVectorStore(VectorStore):
         """Asynchronously delete documents by ID."""
         return await asyncio.get_running_loop().run_in_executor(
             None, partial(self.delete, **kwargs), ids
+        )
+
+    async def aadd_texts(
+        self,
+        texts: Iterable[str],
+        metadatas: Optional[List[dict]] = None,
+        *,
+        ids: Optional[List[str]] = None,
+        **kwargs: Any,
+    ) -> List[str]:
+        """Asynchronously add texts to the vector store."""
+        return await asyncio.get_running_loop().run_in_executor(
+            None, partial(self.add_texts, **kwargs), texts, metadatas, ids
         )
 
     def similarity_search(
@@ -181,29 +204,46 @@ class DeeplakeVectorStore(VectorStore):
         return await asyncio.get_running_loop().run_in_executor(None, func)
 
     def similarity_search_with_score(
-        self, query: str, k: int = 4, filter: Optional[dict] = None, **kwargs: Any
-    ) -> List[Tuple[Document, float]]:
+        self,
+        query: str,
+        k: int = 4,
+        filter: Optional[dict] = None,
+        tql: Optional[str] = None,
+        **kwargs: Any,
+    ) -> List[Tuple[Document, Optional[float]]]:
         """Return documents most similar to query with scores."""
-        query_embedding = self.embedding_function.embed_query(query)
-        emb_str = ", ".join([str(e) for e in query_embedding])
+        if query is None and tql is None:
+            raise MissingQueryOrTQLError()
 
-        # Build TQL query
-        tql = f"""
-        SELECT * FROM (SELECT documents, metadatas, COSINE_SIMILARITY(embeddings, ARRAY[{emb_str}]) as score)
-        """
-        if filter:
-            conditions = [f"metadatas['{k}'] = '{v}'" for k, v in filter.items()]
-            tql += f" WHERE {' AND '.join(conditions)}"
+        if (query is None) == (tql is None):
+            raise InvalidQuerySpecificationError()
 
-        tql += f" ORDER BY score DESC LIMIT {k}"
+        if query is None:
+            query_embedding = None
+        else:
+            query_embedding = self.embedding_function.embed_query(query)
+
+        tql = search(
+            dataset=self.dataset,
+            query_embedding=query_embedding,
+            distance_metric="cos",
+            k=k,
+            tql_string=tql,
+            tql_filter=filter,
+            embedding_tensor="embeddings",
+            return_tensors=["documents", "metadatas"],
+        )
 
         results = self.dataset.query(tql)
 
         docs_with_scores_columnar = {
             "documents": results["documents"][:],
             "metadatas": results["metadatas"][:],
-            "score": results["score"][:],
         }
+
+        has_score = "score" in [col.name for col in results.schema.columns]
+        if has_score:
+            docs_with_scores_columnar["score"] = results["score"][:]
 
         docs_with_scores = []
         for i in range(len(results)):
@@ -211,7 +251,7 @@ class DeeplakeVectorStore(VectorStore):
                 page_content=docs_with_scores_columnar["documents"][i],
                 metadata=docs_with_scores_columnar["metadatas"][i].to_dict(),
             )
-            score = docs_with_scores_columnar["score"][i]
+            score = docs_with_scores_columnar["score"][i] if has_score else None
             docs_with_scores.append((doc, score))
 
         return docs_with_scores
@@ -237,6 +277,19 @@ class DeeplakeVectorStore(VectorStore):
         query_embedding = self.embedding_function.embed_query(query)
         return self.max_marginal_relevance_search_by_vector(
             query_embedding, k=k, fetch_k=fetch_k, lambda_mult=lambda_mult, **kwargs
+        )
+
+    async def amax_marginal_relevance_search(
+        self,
+        query: str,
+        k: int = 4,
+        fetch_k: int = 20,
+        lambda_mult: float = 0.5,
+        **kwargs: Any,
+    ) -> list[Document]:
+        """Asynchronously return documents selected using maximal marginal relevance."""
+        return await asyncio.get_running_loop().run_in_executor(
+            None, partial(self.max_marginal_relevance_search, **kwargs)
         )
 
     def max_marginal_relevance_search_by_vector(
@@ -304,6 +357,9 @@ class DeeplakeVectorStore(VectorStore):
             for i in selected_indices
         ]
 
+    def delete_dataset(self) -> None:
+        deeplake.delete(self.dataset_path)
+
     @classmethod
     def from_texts(
         cls: Type[VST],
@@ -329,8 +385,7 @@ class DeeplakeVectorStore(VectorStore):
     ) -> VST:
         """Asynchronously create DeeplakeVectorStore from raw texts."""
         store = cls(dataset_path=dataset_path, embedding_function=embedding, **kwargs)
-        await store.aadd_texts(texts=texts, metadatas=metadatas)
-        return store
+        return await store.aadd_texts(texts=texts, metadatas=metadatas)
 
     def _select_relevance_score_fn(self) -> Callable[[float], float]:
         """Return relevance score function."""

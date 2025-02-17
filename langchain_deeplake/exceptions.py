@@ -1,4 +1,3 @@
-
 class ColumnMissingError(Exception):
     def __init__(self, column: str):
         super().__init__(f"Column '{column}' is not present in the Vector Store.")
@@ -6,7 +5,9 @@ class ColumnMissingError(Exception):
 
 class UnexpectedUDFFilterError(Exception):
     def __init__(self, column: str):
-        super().__init__("UDF filter functions are not supported with DeepLake search. Please use TQL filter instead.")
+        super().__init__(
+            "UDF filter functions are not supported with DeepLake search. Please use TQL filter instead."
+        )
 
 
 class MissingQueryOrTQLError(ValueError):

@@ -1,8 +1,10 @@
-
 import numpy as np
 import deeplake
 
-from langchain_deeplake.distance_metric import get_tql_distance_metric, get_order_type_for_distance_metric
+from langchain_deeplake.distance_metric import (
+    get_tql_distance_metric,
+    get_order_type_for_distance_metric,
+)
 from langchain_deeplake.filtering_util import attribute_based_filtering_tql
 from langchain_deeplake.exceptions import UnexpectedUDFFilterError
 
@@ -125,7 +127,9 @@ def search(
         return tql_string
 
     if query_embedding is None:
-        return create_query_string(None, tql_filter, limit, None, tensor_list=return_tensors)
+        return create_query_string(
+            None, tql_filter, limit, None, tensor_list=return_tensors
+        )
     else:
         query_embedding_str = convert_tensor_to_str(query_embedding)
 
