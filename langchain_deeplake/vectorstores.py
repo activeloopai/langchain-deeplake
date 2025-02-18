@@ -209,6 +209,7 @@ class DeeplakeVectorStore(VectorStore):
         k: int = 4,
         filter: Optional[dict] = None,
         tql: Optional[str] = None,
+        distance_metric: str = "cos",
         **kwargs: Any,
     ) -> List[Tuple[Document, Optional[float]]]:
         """Return documents most similar to query with scores."""
@@ -226,7 +227,7 @@ class DeeplakeVectorStore(VectorStore):
         tql = search(
             dataset=self.dataset,
             query_embedding=query_embedding,
-            distance_metric="cos",
+            distance_metric=distance_metric,
             k=k,
             tql_string=tql,
             tql_filter=filter,
@@ -356,6 +357,80 @@ class DeeplakeVectorStore(VectorStore):
             )
             for i in selected_indices
         ]
+
+    def similarity_search_by_vector(
+        self,
+        embedding: Union[List[float], np.ndarray],
+        k: int = 4,
+        **kwargs: Any,
+    ) -> List[Document]:
+        """
+        Return docs most similar to embedding vector.
+
+        Examples:
+            >>> # Search using an embedding
+            >>> data = vector_store.similarity_search_by_vector(
+            ...    embedding=<your_embedding>,
+            ...    k=<num_items_to_return>,
+            ... )
+
+        Args:
+            embedding (Union[List[float], np.ndarray]):
+                Embedding to find similar docs.
+            k (int): Number of Documents to return. Defaults to 4.
+            kwargs: Additional keyword arguments including:
+                filter (Union[Dict, Callable], optional):
+                    Additional filter before embedding search.
+                    - ``Dict`` - Key-value search on tensors of htype json. True
+                        if all key-value filters are satisfied.
+                        Dict = {"tensor_name_1": {"key": value},
+                                "tensor_name_2": {"key": value}}
+                    - ``Function`` - Any function compatible with
+                        `deeplake.filter`.
+                    Defaults to None.
+                distance_metric (str): `L2` for Euclidean, `cos` for cosine similarity, Defaults to `cos`.
+
+        Returns:
+            List[Document]: List of Documents most similar to the query vector.
+        """
+
+        tql = search(
+            dataset=self.dataset,
+            query_embedding=embedding,
+            distance_metric=(
+                "cos"
+                if "distance_metric" not in kwargs
+                else kwargs["distance_metric"].lower()
+            ),
+            k=k,
+            tql_string=kwargs.get("tql", None),
+            tql_filter=kwargs.get("filter", None),
+            embedding_tensor="embeddings",
+            return_tensors=["embeddings", "metadatas", "documents", "ids"],
+        )
+
+        results = self.dataset.query(tql)
+
+        scores = results["score"][:]
+        embeddings = results["embeddings"][:]
+        metadatas = results["metadatas"][:]
+        texts = results["documents"][:]
+
+        docs = [
+            Document(
+                page_content=text,
+                metadata=metadata,
+            )
+            for text, metadata in zip(texts, metadatas)
+        ]
+
+        if "return_score" in kwargs and kwargs["return_score"]:
+            if not isinstance(scores, list):
+                scores = [scores]
+
+            return [(doc, score) for doc, score in zip(docs, scores)]
+
+        return docs
 
     def delete_dataset(self) -> None:
         deeplake.delete(self.dataset_path)
