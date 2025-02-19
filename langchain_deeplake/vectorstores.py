@@ -78,7 +78,7 @@ class DeeplakeVectorStore(VectorStore):
                 schema={
                     "ids": deeplake.types.Text(),
                     "embeddings": deeplake.types.Embedding(),
-                    "metadatas": deeplake.types.Dict(),
+                    "metadata": deeplake.types.Dict(),
                     "documents": deeplake.types.Text(),
                 },
             )
@@ -116,7 +116,7 @@ class DeeplakeVectorStore(VectorStore):
             {
                 "ids": ids,
                 "embeddings": embeddings,
-                "metadatas": metadatas,
+                "metadata": metadatas,
                 "documents": texts,
             }
         )
@@ -156,7 +156,7 @@ class DeeplakeVectorStore(VectorStore):
         ids_str = ", ".join([f"'{i}'" for i in ids])
         results = self.dataset.query(f"SELECT * WHERE ids IN ({ids_str})")
         docs = results["documents"][:]
-        metadatas = results["metadatas"][:]
+        metadatas = results["metadata"][:]
         return [
             Document(page_content=docs[i], metadata=metadatas[i].to_dict())
             for i in range(len(results))
@@ -216,8 +216,8 @@ class DeeplakeVectorStore(VectorStore):
         if query is None and tql is None:
             raise MissingQueryOrTQLError()
 
-        if (query is None) == (tql is None):
-            raise InvalidQuerySpecificationError()
+        # if (query is None) == (tql is None):
+        #     raise InvalidQuerySpecificationError()
 
         if query is None:
             query_embedding = None
@@ -232,25 +232,27 @@ class DeeplakeVectorStore(VectorStore):
             tql_string=tql,
             tql_filter=filter,
             embedding_tensor="embeddings",
-            return_tensors=["documents", "metadatas"],
+            return_tensors=["documents", "metadata"],
         )
 
+        print("TQL:", tql)
         results = self.dataset.query(tql)
 
         docs_with_scores_columnar = {
             "documents": results["documents"][:],
-            "metadatas": results["metadatas"][:],
+            "metadata": results["metadata"][:],
         }
 
         has_score = "score" in [col.name for col in results.schema.columns]
         if has_score:
             docs_with_scores_columnar["score"] = results["score"][:]
 
+        print("Results:", len(results))
         docs_with_scores = []
         for i in range(len(results)):
             doc = Document(
                 page_content=docs_with_scores_columnar["documents"][i],
-                metadata=docs_with_scores_columnar["metadatas"][i].to_dict(),
+                metadata=docs_with_scores_columnar["metadata"][i].to_dict(),
             )
             score = docs_with_scores_columnar["score"][i] if has_score else None
             docs_with_scores.append((doc, score))
@@ -306,7 +308,7 @@ class DeeplakeVectorStore(VectorStore):
         # Get initial results
         results = self.dataset.query(
             f"""
-            SELECT * FROM (SELECT documents, metadatas, embeddings, 
+            SELECT * FROM (SELECT documents, metadata, embeddings,
             COSINE_SIMILARITY(embeddings, ARRAY[{emb_str}]) as score)
             ORDER BY score DESC LIMIT {fetch_k}
         """
@@ -353,7 +355,7 @@ class DeeplakeVectorStore(VectorStore):
         # Return selected documents
         return [
             Document(
-                page_content=results[i]["documents"], metadata=results[i]["metadatas"]
+                page_content=results[i]["documents"], metadata=results[i]["metadata"]
             )
             for i in selected_indices
         ]
@@ -406,14 +408,14 @@ class DeeplakeVectorStore(VectorStore):
             tql_string=kwargs.get("tql", None),
             tql_filter=kwargs.get("filter", None),
             embedding_tensor="embeddings",
-            return_tensors=["embeddings", "metadatas", "documents", "ids"],
+            return_tensors=["embeddings", "metadata", "documents", "ids"],
         )
 
         results = self.dataset.query(tql)
 
         scores = results["score"][:]
         embeddings = results["embeddings"][:]
-        metadatas = results["metadatas"][:]
+        metadatas = results["metadata"][:]
         texts = results["documents"][:]
 
         docs = [
@@ -465,3 +467,16 @@ class DeeplakeVectorStore(VectorStore):
     def _select_relevance_score_fn(self) -> Callable[[float], float]:
         """Return relevance score function."""
         return lambda x: x  # Identity function since scores are already normalized
+
+from langchain.retrievers.self_query.base import _get_builtin_translator
+_original_get_builtin_translator = _get_builtin_translator
+
+def _patched_get_builtin_translator(vectorstore):
+    """Patched version of _get_builtin_translator to handle DeeplakeVectorStore type."""
+    if isinstance(vectorstore, DeeplakeVectorStore):
+        from langchain_community.query_constructors.deeplake import DeepLakeTranslator
+        return DeepLakeTranslator()
+    return _original_get_builtin_translator(vectorstore)
+
+import langchain.retrievers.self_query.base
+langchain.retrievers.self_query.base._get_builtin_translator = _patched_get_builtin_translator

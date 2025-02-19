@@ -41,12 +41,12 @@ def test_deeplake() -> None:
     assert output == [Document(page_content="foo")]
 
 
-def test_deeplake_with_metadatas() -> None:
+def test_deeplake_with_metadata() -> None:
     """Test end to end construction and search."""
     texts = ["foo", "bar", "baz"]
     metadatas = [{"page": str(i)} for i in range(len(texts))]
     docsearch = DeeplakeVectorStore.from_texts(
-        dataset_path="mem://test_deeplake_with_metadatas",
+        dataset_path="mem://test_deeplake_with_metadata",
         texts=texts,
         embedding=DeterministicFakeEmbedding(size=384),
         metadatas=metadatas,
@@ -163,7 +163,7 @@ def test_similarity_search_with_filter(
         "foo",
         k=1,
         distance_metric=distance_metric,
-        filter={"metadatas": {"page": "1"}},
+        filter={"metadata": {"page": "1"}},
     )
     assert output == [Document(page_content="bar", metadata={"page": "1"})]
     deeplake_datastore.delete_dataset()
@@ -184,6 +184,21 @@ def test_max_marginal_relevance_search(deeplake_datastore: DeeplakeVectorStore) 
     )
 
     assert output == [Document(page_content="foo", metadata={"page": "0"})]
+    deeplake_datastore.delete_dataset()
+
+
+def test_delete_dataset_by_ids(deeplake_datastore: DeeplakeVectorStore) -> None:
+    """Test delete dataset."""
+    id = deeplake_datastore.dataset['ids'][0]
+    deeplake_datastore.delete(ids=[id])
+    assert (
+        deeplake_datastore.similarity_search(
+            "foo", k=1, filter={"metadata": {"page": "0"}}
+        )
+        == []
+    )
+    assert len(deeplake_datastore.dataset) == 2
+
     deeplake_datastore.delete_dataset()
 
 
@@ -243,5 +258,6 @@ def test_search():
     docs = [Document(page_content=content) for content in texts]
     vectorstore.add_documents(docs)
     assert len(vectorstore) == len(texts)
+    vectorstore.dataset.summary()
     results = vectorstore.similarity_search("how we think", k=5)
     assert len(results) == 5
