@@ -158,7 +158,7 @@ class DeeplakeVectorStore(VectorStore):
         docs = results["documents"][:]
         metadatas = results["metadata"][:]
         return [
-            Document(page_content=docs[i], metadata=metadatas[i].to_dict())
+            Document(page_content=docs[i], metadata=metadatas[i].to_dict(convert_numpy_to_list=True))
             for i in range(len(results))
         ]
 
@@ -250,7 +250,7 @@ class DeeplakeVectorStore(VectorStore):
         for i in range(len(results)):
             doc = Document(
                 page_content=docs_with_scores_columnar["documents"][i],
-                metadata=docs_with_scores_columnar["metadata"][i].to_dict(),
+                metadata=docs_with_scores_columnar["metadata"][i].to_dict(convert_numpy_to_list=True),
             )
             score = docs_with_scores_columnar["score"][i] if has_score else None
             docs_with_scores.append((doc, score))

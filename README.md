@@ -264,13 +264,11 @@ retriever.get_relevant_documents("What are some movies about dinosaurs")
 ```
 
 Output:
-Output:
-
 ```
-[Document(metadata={'genre': 'science fiction', 'rating': array(7.7), 'year': array(1993)}, page_content='A bunch of scientists bring back dinosaurs and mayhem breaks loose'),
- Document(metadata={'genre': 'science fiction', 'rating': array(7.7), 'year': array(1993)}, page_content='A bunch of scientists bring back dinosaurs and mayhem breaks loose'),
- Document(metadata={'genre': 'animated', 'year': array(1995)}, page_content='Toys come alive and have a blast doing so'),
- Document(metadata={'genre': 'animated', 'year': array(1995)}, page_content='Toys come alive and have a blast doing so')]
+[Document(metadata={'genre': 'science fiction', 'rating': 7.7, 'year': 1993}, page_content='A bunch of scientists bring back dinosaurs and mayhem breaks loose'),
+ Document(metadata={'genre': 'science fiction', 'rating': 7.7, 'year': 1993}, page_content='A bunch of scientists bring back dinosaurs and mayhem breaks loose'),
+ Document(metadata={'genre': 'animated', 'year': 1995}, page_content='Toys come alive and have a blast doing so'),
+ Document(metadata={'genre': 'animated', 'year': 1995}, page_content='Toys come alive and have a blast doing so')]
 ```
 
 Now we can run a query to find movies that are above a certain ranking:
@@ -282,12 +280,11 @@ retriever.get_relevant_documents("I want to watch a movie rated higher than 8.5"
 
 Output:
 ```
-[Document(metadata={'director': 'Satoshi Kon', 'rating': array(8.6), 'year': array(2006)}, page_content='A psychologist / detective gets lost in a series of dreams within dreams within dreams and Inception reused the idea'),
- Document(metadata={'director': 'Andrei Tarkovsky', 'genre': 'science fiction', 'rating': array(9.9), 'year': array(1979)}, page_content='Three men walk into the Zone, three men walk out of the Zone'),
- Document(metadata={'director': 'Satoshi Kon', 'rating': array(8.6), 'year': array(2006)}, page_content='A psychologist / detective gets lost in a series of dreams within dreams within dreams and Inception reused the idea'),
- Document(metadata={'director': 'Andrei Tarkovsky', 'genre': 'science fiction', 'rating': array(9.9), 'year': array(1979)}, page_content='Three men walk into the Zone, three men walk out of the Zone'), Document(metadata={'director': 'Satoshi Kon', 'rating': array(8.6), 'year': array(2006)}, page_content='A psychologist / detective gets lost in a series of dreams within dreams within dreams and Inception reused the idea'), Document(metadata={'director': 'Andrei Tarkovsky', 'genre': 'science fiction', 'rating': array(9.9), 'year': array(1979)}, page_content='Three men walk into the Zone, three men walk out of the Zone')]
+[Document(metadata={'director': 'Satoshi Kon', 'rating': 8.6, 'year': 2006}, page_content='A psychologist / detective gets lost in a series of dreams within dreams within dreams and Inception reused the idea'),
+ Document(metadata={'director': 'Andrei Tarkovsky', 'genre': 'science fiction', 'rating': 9.9, 'year': 1979}, page_content='Three men walk into the Zone, three men walk out of the Zone'),
+ Document(metadata={'director': 'Satoshi Kon', 'rating': 8.6, 'year': 2006}, page_content='A psychologist / detective gets lost in a series of dreams within dreams within dreams and Inception reused the idea'),
+ Document(metadata={'director': 'Andrei Tarkovsky', 'genre': 'science fiction', 'rating': 9.9, 'year': 1979}, page_content='Three men walk into the Zone, three men walk out of the Zone')]
 ```
 
 
 Congrats! You just used the Deep Lake Vector Store in LangChain to create a Q&A App! 🎉
-
