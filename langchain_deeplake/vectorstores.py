@@ -235,7 +235,6 @@ class DeeplakeVectorStore(VectorStore):
             return_tensors=["documents", "metadata"],
         )
 
-        print("TQL:", tql)
         results = self.dataset.query(tql)
 
         docs_with_scores_columnar = {
@@ -247,7 +246,6 @@ class DeeplakeVectorStore(VectorStore):
         if has_score:
             docs_with_scores_columnar["score"] = results["score"][:]
 
-        print("Results:", len(results))
         docs_with_scores = []
         for i in range(len(results)):
             doc = Document(
